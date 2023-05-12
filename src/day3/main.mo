@@ -1,18 +1,15 @@
-import Result "mo:base/Result";
-import HashMap "mo:base/HashMap";
-import Principal "mo:base/Principal";
 import Buffer "mo:base/Buffer";
-import Nat "mo:base/Nat";
-import Hash "mo:base/Hash";
-import Text "mo:base/Text";
+import Result "mo:base/Result";
+import Array "mo:base/Array";
 import Iter "mo:base/Iter";
+import HashMap "mo:base/HashMap";
+import Nat "mo:base/Nat";
+import Nat32 "mo:base/Nat32";
+import Text "mo:base/Text";
+import Hash "mo:base/Hash";
+import Principal "mo:base/Principal";
 
-actor class StudentWall(){
-    var messageId : Nat = 0;
-    private func _hashNat(n:Nat) : Hash.Hash = return Text.hash(Nat.toText(n));
-    let wall = HashMap.HashMap<Nat, Message>(0, Nat.equal, _hashNat);
-
-//Type Definition
+actor class StudentWall() {
 
     public type Answer = (
         description : Text, 
@@ -31,147 +28,185 @@ actor class StudentWall(){
     };
 
     public type Message = {
-    vote : Int;
-    content : Content;
-    creator: Principal;
+        vote : Int;
+        content : Content;
+        creator : Principal;
     };
 
-//ADD NEW MESSAGE
-    public shared ({ caller }) func writeMessage(c : Content) : async Nat{
-        let id : Nat = messageId;
-            messageId += 1;
-        let msg : Message = {
-            vote = 0;
-            content = c;
-            creator = caller;
-        };
-        wall.put(id,msg);
-        return id;
-    };
+	stable var messageIdCount : Nat = 0;
 
-//GET MESSAGE
-    public shared query func getMessage(messageId : Nat) : async Result.Result<?Message, Text> {
-        let msg : ?Message = wall.get(messageId);
-        if (msg == null) {
-            return #err ("Not Implemented / Out of Index")
-        }
-        else {
-            return #ok(msg);
-        }
-    };
+	private func _hashNat(n : Nat) : Hash.Hash = return Text.hash(Nat.toText(n));
+	let wall = HashMap.HashMap<Nat, Message>(0, Nat.equal, _hashNat);
 
-//UPDATE MESSAGE
-    public shared ({ caller }) func updateMessage(messageId : Nat, c : Content) : async Result.Result<(), Text> {
-        let validator : ?Message = wall.get(messageId);
-        switch(validator){
-            case(null){
-                return #err("Not Implemented / Out of Index");
-            };
-            case(?currentMessage){
-                if (Principal.equal(currentMessage.creator, caller)){
-                    let msg = {
-                        vote = currentMessage.vote;
-                        content = c;
-                        creator = currentMessage.creator;
-                    };
-                    wall.put(messageId,msg);
-                    return #ok();
-                }
-                else {
-                    return #err ("You are not the owner of this message.");
-                }
-            };
-        }
-    };
+	public shared ({ caller }) func writeMessage(c : Content) : async Nat {
+		
+		let id : Nat = messageIdCount;
+		messageIdCount += 1;
 
-//DELETE MESSAGE
-    public shared ({ caller }) func deleteMessage(messageId : Nat) : async Result.Result<(), Text> {
-        let msg : ?Message = wall.get(messageId);
-        if (msg == null) {
-            return #err ("Not Implemented / Out of Index")
-        }
-        else {
-            wall.delete(messageId);
-            return #ok();
-        }
-    };
+		
+		var newMessage : Message = {
+			vote = 0;
+			content = c;
+			creator = caller;
+		};
 
-//UPVOTE MESSAGE
-    public func upVote(messageId : Nat) : async Result.Result<(), Text> {
-        let msg : ?Message= wall.get(messageId);
-        switch(msg) {
-            case (null){
-                return #err ("Not Implemented / Out of Index")
-            };
-            case (?currentMessage){
-                let new_msg = {
-                    vote = currentMessage.vote + 1;
-                    content = currentMessage.content;
-                    creator = currentMessage.creator;
-                };
-                wall.put(messageId,new_msg);
-                return #ok();
-            }
+		
+		wall.put(id, newMessage);
 
-        }
-    };
+		return id;
+	};
 
-//DOWNVOTE MESSAGE
-    public func downVote(messageId : Nat) : async Result.Result<(), Text> {
-        let msg : ?Message= wall.get(messageId);
-        switch(msg) {
-            case (null){
-                return #err ("Not Implemented / Out of Index")
-            };
-            case (?currentMessage){
-                let new_msg = {
-                    vote = currentMessage.vote - 1;
-                    content = currentMessage.content;
-                    creator = currentMessage.creator;
-                };
-                wall.put(messageId,new_msg);
-                return #ok();
-            }
+	
+	public shared query func getMessage(messageId : Nat) : async Result.Result<Message, Text> {
+		let messageData : ?Message = wall.get(messageId);
 
-        }
-    };
+		switch (messageData) {
+			case (null) {
+				return #err "El mensaje solicitado no existe";
+			};
+			case (?message) {
+				return #ok message;
+			};
+		};
+	};
 
-//GET ALL MESSAGES
-    public func getAllMessages() : async [Message] {
-        let list = Buffer.Buffer<Message>(0);
-        for (value in wall.vals()){
-            list.add(value);
-        };
-        return Buffer.toArray<Message>(list);
-    };
+	public shared ({ caller }) func updateMessage(messageId : Nat, c : Content) : async Result.Result<(), Text> {
+		var isAuth : Bool = not Principal.isAnonymous(caller);
 
-//GET ALL MESSAGES RANKED
-    public func getAllMessagesRanked() : async [Message] {
-        let list = Buffer.Buffer<Message>(0);
-        let list2 = Buffer.Buffer<Message>(0);
-        
-        for (value in wall.vals()){
-            list.add(value);
-        };
+		if (not isAuth) {
+			return #err "Debes autenticarte para validar que eres el creador del mensaje";
+		};
 
-        var j = 0;
-        var index = 0;
-        var votx : Int = 0;
+		let messageData : ?Message = wall.get(messageId);
 
-        while (list.size() > 0) {
-            j := 0;
-            index := 0;
-            votx := list.get(index).vote;
-            for (value in list.vals()){
-                if (votx < value.vote){
-                    index := j;
-                    votx := value.vote;
-                };
-                j += 1;
-            };
-            list2.add(list.get(index));
-            let x = list.remove(index);
-        };
-        return Buffer.toArray<Message>(list2);
-    };
-}
+		switch (messageData) {
+			case (null) {
+				return #err "El mensaje solicitado no existe";
+			};
+			case (?message) {
+				if (message.creator != caller) {
+					return #err "Usted no es el creador de este mensaje";
+				};
+
+				let updatedMessage : Message = {
+					vote = message.vote;
+					creator = message.creator;
+					content = c;
+				};
+
+				wall.put(messageId, updatedMessage);
+
+				return #ok();
+			};
+		};
+	};
+
+	public shared ({ caller }) func deleteMessage(messageId : Nat) : async Result.Result<(), Text> {
+		let messageData : ?Message = wall.get(messageId);
+
+		switch (messageData) {
+			case (null) {
+				return #err "El mensaje solicitado no existe";
+			};
+			case (?message) {
+				if (message.creator != caller) {
+					return #err "Usted no es el creador de este mensaje";
+				};
+
+				ignore wall.remove(messageId);
+
+				return #ok();
+			};
+		};
+
+		return #ok();
+	};
+
+	public func upVote(messageId : Nat) : async Result.Result<(), Text> {
+		let messageData : ?Message = wall.get(messageId);
+
+		switch (messageData) {
+			case (null) {
+				return #err "El mensaje solicitado no existe";
+			};
+			case (?message) {
+				let updatedMessage : Message = {
+					vote = message.vote + 1;
+					creator = message.creator;
+					content = message.content;
+				};
+
+				wall.put(messageId, updatedMessage);
+
+				return #ok();
+			};
+		};
+
+		return #ok();
+	};
+
+	public func downVote(messageId : Nat) : async Result.Result<(), Text> {
+		let messageData : ?Message = wall.get(messageId);
+
+		switch (messageData) {
+			case (null) {
+				return #err "El mensaje solicitado no existe";
+			};
+			case (?message) {
+				let updatedMessage : Message = {
+					vote = message.vote - 1;
+					creator = message.creator;
+					content = message.content;
+				};
+
+				wall.put(messageId, updatedMessage);
+
+				return #ok();
+			};
+		};
+
+		return #ok();
+	};
+
+	public func getAllMessages() : async [Message] {
+		let messagesBuff = Buffer.Buffer<Message>(0);
+
+		for (msg in wall.vals()) {
+			messagesBuff.add(msg);
+		};
+
+		return Buffer.toArray<Message>(messagesBuff);
+	};
+
+	public func getAllMessagesRanked() : async [Message] {
+		let messagesBuff = Buffer.Buffer<Message>(0);
+
+		for (msg in wall.vals()) {
+			messagesBuff.add(msg);
+		};
+
+		var messages = Buffer.toVarArray<Message>(messagesBuff);
+
+		var size = messages.size();
+
+		if (size > 0) {
+			size -= 1;
+		};
+
+		for (a in Iter.range(0, size)) {
+			var maxIndex = a;
+
+			for (b in Iter.range(a, size)) {
+				if (messages[b].vote > messages[a].vote) {
+					maxIndex := b;
+				};
+			};
+
+			let tmp = messages[maxIndex];
+			messages[maxIndex] := messages[a];
+			messages[a] := tmp;
+		};
+
+		return Array.freeze<Message>(messages);
+	};
+};
